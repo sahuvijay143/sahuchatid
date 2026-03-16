@@ -1,85 +1,123 @@
+import fs from "fs";
+
 const TOKEN = "8614503312:AAGq8QSpIdsP8gaAS1Q8TmYX69k4rG5FePg";
 const OWNER_ID = 6941192709;
 
-let users = new Set();
-
-async function sendMessage(chatId, text, keyboard = null) {
-  await fetch(`https://api.telegram.org/bot${TOKEN}/sendMessage`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      chat_id: chatId,
-      text: text,
-      parse_mode: "HTML",
-      reply_markup: keyboard
-    })
-  });
+function getUsers() {
+  return JSON.parse(fs.readFileSync("./users.json"));
 }
 
-export default async function handler(req, res) {
+function saveUsers(data) {
+  fs.writeFileSync("./users.json", JSON.stringify(data, null, 2));
+}
 
-  const body = req.body;
+async function sendMessage(chatId, text, keyboard=null) {
 
-  if (body.message) {
+  await fetch(`https://api.telegram.org/bot${TOKEN}/sendMessage`,{
+    method:"POST",
+    headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({
+      chat_id:chatId,
+      text:text,
+      parse_mode:"HTML",
+      reply_markup:keyboard
+    })
+  });
 
-    const chatId = body.message.chat.id;
-    const text = body.message.text;
+}
 
-    users.add(chatId);
+async function sendPhoto(chatId, photo, caption=""){
 
-    // START COMMAND
-    if (text === "/start") {
+  await fetch(`https://api.telegram.org/bot${TOKEN}/sendPhoto`,{
+    method:"POST",
+    headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({
+      chat_id:chatId,
+      photo:photo,
+      caption:caption
+    })
+  });
 
-      const message = `
-<b>👋 Welcome to SAHU CHAT ID FIND</b>
+}
 
-📌 Your Chat ID:
+export default async function handler(req,res){
+
+const body=req.body;
+
+if(body.message){
+
+const chatId=body.message.chat.id;
+const text=body.message.text;
+
+let users=getUsers();
+
+if(!users.includes(chatId)){
+users.push(chatId);
+saveUsers(users);
+}
+
+if(text==="/start"){
+
+await sendMessage(chatId,
+`👋 <b>Welcome to SAHU CHAT ID FIND</b>
+
+📌 Your Chat ID
 <code>${chatId}</code>
 
-Click and Copy your Chat ID easily.
+Use this ID anywhere.
 
-⚡ Features
-• Find Chat ID
-• Easy Copy
-• Fast Bot
+⚡ Fast • Simple • Free`);
 
-Developer : SAHU
-`;
+}
 
-      const keyboard = {
-        inline_keyboard: [
-          [
-            { text: "📋 Copy Chat ID", callback_data: "copy" }
-          ],
-          [
-            { text: "🤖 Bot Info", callback_data: "info" }
-          ]
-        ]
-      };
+// ADMIN PANEL
+if(chatId===OWNER_ID && text==="/admin"){
 
-      await sendMessage(chatId, message, keyboard);
-    }
+await sendMessage(chatId,
+`⚙️ ADMIN PANEL
 
-    // BROADCAST
-    if (chatId === OWNER_ID && text.startsWith("/broadcast")) {
+/users - total users
+/broadcast - send message
+/bphoto - photo broadcast`);
 
-      const msg = text.replace("/broadcast ", "");
+}
 
-      for (let id of users) {
-        await sendMessage(id, `📢 <b>Broadcast Message</b>\n\n${msg}`);
-      }
+// USER COUNT
+if(chatId===OWNER_ID && text==="/users"){
 
-      await sendMessage(chatId, `✅ Broadcast Sent\n👥 Users : ${users.size}`);
-    }
+await sendMessage(chatId,
+`👥 Total Users : ${users.length}`);
 
-    // USER COUNT
-    if (chatId === OWNER_ID && text === "/users") {
+}
 
-      await sendMessage(chatId, `👥 Total Users : ${users.size}`);
-    }
+// TEXT BROADCAST
+if(chatId===OWNER_ID && text.startsWith("/broadcast")){
 
-  }
+let msg=text.replace("/broadcast ","");
 
-  res.status(200).send("ok");
+let sent=0;
+
+for(let id of users){
+
+try{
+await sendMessage(id,`📢 Broadcast
+
+${msg}`);
+sent++;
+}catch{}
+
+}
+
+await sendMessage(chatId,
+`✅ Broadcast Done
+
+Sent : ${sent}
+Users : ${users.length}`);
+
+}
+
+}
+
+res.status(200).send("ok");
 
 }
