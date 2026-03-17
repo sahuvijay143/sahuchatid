@@ -86,7 +86,7 @@ Developer : SAHU`,
     }
 
     // ADMIN PANEL
-    if (chatId === OWNER_ID && text.startsWith("/admin")) {
+    if (chatId === OWNER_ID && text.includes("/admin")) {
       await sendMessage(
         chatId,
         `⚙️ <b>ADMIN PANEL</b>
@@ -99,14 +99,14 @@ Developer : SAHU`,
     }
 
     // USERS COUNT
-    if (chatId === OWNER_ID && text.startsWith("/users")) {
+    if (chatId === OWNER_ID && text.includes("/users")) {
       const count = await usersDB.countDocuments();
       await sendMessage(chatId, `👥 Total Users : ${count}`);
     }
 
     // TEXT BROADCAST
-    if (chatId === OWNER_ID && text.startsWith("/broadcast")) {
-      const msg = text.replace("/broadcast", "").trim();
+    if (chatId === OWNER_ID && text.includes("/broadcast")) {
+      const msg = text.split("/broadcast")[1]?.trim();
 
       const allUsers = await usersDB.find().toArray();
 
@@ -128,7 +128,7 @@ Sent : ${sent}`
     }
 
     // PHOTO BROADCAST
-    if (chatId === OWNER_ID && text.startsWith("/photo")) {
+    if (chatId === OWNER_ID && text.includes("/photo")) {
       const url = text.replace("/photo", "").trim();
 
       const allUsers = await usersDB.find().toArray();
@@ -143,7 +143,7 @@ Sent : ${sent}`
     }
 
     // BUTTON BROADCAST
-    if (chatId === OWNER_ID && text.startsWith("/button")) {
+    if (chatId === OWNER_ID && text.includes("/button")) {
       const data = text.replace("/button", "").trim().split("|");
 
       const btnText = data[0];
