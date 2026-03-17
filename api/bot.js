@@ -1,140 +1,157 @@
+import { MongoClient } from "mongodb";
+
 const TOKEN = "8614503312:AAGq8QSpIdsP8gaAS1Q8TmYX69k4rG5FePg";
-const OWNER_ID = 6941192709;
+const OWNER_ID = "6941192709";
 
-let users = new Set();
+const client = new MongoClient(process.env.MONGO_URI);
 
-async function sendMessage(chatId, text, keyboard=null){
-
-await fetch(`https://api.telegram.org/bot${TOKEN}/sendMessage`,{
-method:"POST",
-headers:{"Content-Type":"application/json"},
-body:JSON.stringify({
-chat_id:chatId,
-text:text,
-parse_mode:"HTML",
-reply_markup:keyboard
-})
-})
-
+async function getDB() {
+  if (!client.topology?.isConnected()) await client.connect();
+  return client.db("telegram").collection("users");
 }
 
-async function sendPhoto(chatId,photo,caption=""){
-
-await fetch(`https://api.telegram.org/bot${TOKEN}/sendPhoto`,{
-method:"POST",
-headers:{"Content-Type":"application/json"},
-body:JSON.stringify({
-chat_id:chatId,
-photo:photo,
-caption:caption
-})
-})
-
+async function sendMessage(chatId, text, keyboard=null) {
+  await fetch(`https://api.telegram.org/bot${TOKEN}/sendMessage`, {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({
+      chat_id: chatId,
+      text,
+      parse_mode: "HTML",
+      reply_markup: keyboard
+    })
+  });
 }
 
-export default async function handler(req,res){
-
-const body=req.body;
-
-if(!body.message){
-return res.status(200).send("ok");
+async function sendPhoto(chatId, photo, caption="") {
+  await fetch(`https://api.telegram.org/bot${TOKEN}/sendPhoto`, {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({
+      chat_id: chatId,
+      photo,
+      caption
+    })
+  });
 }
 
-const chatId=body.message.chat.id;
-const text=body.message.text;
+export default async function handler(req, res) {
 
-users.add(chatId);
+  const body = req.body;
+  if (!body.message) return res.status(200).send("ok");
 
-// START
-if(text==="/start"){
+  const chatId = String(body.message.chat.id);
+  const text = body.message.text;
 
-const keyboard={
-inline_keyboard:[
-[{text:"📋 Copy Chat ID",callback_data:"copy"}],
-[{text:"🤖 Bot Info",callback_data:"info"}]
-]
-}
+  const usersDB = await getDB();
 
-await sendMessage(chatId,
+  // SAVE USER
+  await usersDB.updateOne(
+    { chatId },
+    { $set: { chatId } },
+    { upsert: true }
+  );
+
+  // START
+  if (text === "/start") {
+
+    const keyboard = {
+      inline_keyboard: [
+        [{ text: "📋 Copy Chat ID", callback_data: "copy" }],
+        [{ text: "🤖 Bot Info", callback_data: "info" }]
+      ]
+    };
+
+    await sendMessage(chatId,
 `📌 <b>Your Chat ID</b>
 
 <code>${chatId}</code>
 
-Click and Copy your Chat ID easily.
+⚡ Fast • Simple • Permanent Bot
 
-⚡ Features
-• Find Chat ID
-• Easy Copy
-• Fast Bot
+Developer : SAHU`, keyboard);
+  }
 
-Developer : SAHU`,keyboard)
+  // ADMIN PANEL
+  if (chatId === OWNER_ID && text === "/admin") {
 
-}
-
-// ADMIN PANEL
-if(chatId===OWNER_ID && text==="/admin"){
-
-await sendMessage(chatId,
+    await sendMessage(chatId,
 `⚙️ <b>ADMIN PANEL</b>
 
-📊 /users
+👥 /users
 📢 /broadcast text
 🖼 /photo url
-🎥 /video url`)
+🔘 /button text|link`);
+  }
 
-}
+  // USERS COUNT
+  if (chatId === OWNER_ID && text === "/users") {
 
-// USER COUNT
-if(chatId===OWNER_ID && text==="/users"){
+    const count = await usersDB.countDocuments();
 
-await sendMessage(chatId,
-`👥 Total Users : ${users.size}`)
+    await sendMessage(chatId,
+`👥 Total Users : ${count}`);
+  }
 
-}
+  // TEXT BROADCAST
+  if (chatId === OWNER_ID && text.startsWith("/broadcast")) {
 
-// TEXT BROADCAST
-if(chatId===OWNER_ID && text.startsWith("/broadcast")){
+    const msg = text.replace("/broadcast ", "");
+    const allUsers = await usersDB.find().toArray();
 
-let msg=text.replace("/broadcast ","")
+    let sent = 0;
 
-let success=0
+    for (let user of allUsers) {
+      try {
+        await sendMessage(user.chatId, `📢 ${msg}`);
+        sent++;
+      } catch {}
+    }
 
-for(let id of users){
-
-try{
-await sendMessage(id,`📢 Broadcast
-
-${msg}`)
-success++
-}catch{}
-
-}
-
-await sendMessage(chatId,
+    await sendMessage(chatId,
 `✅ Broadcast Done
 
-Sent : ${success}
-Users : ${users.size}`)
+Sent : ${sent}`);
+  }
 
-}
+  // PHOTO BROADCAST
+  if (chatId === OWNER_ID && text.startsWith("/photo")) {
 
-// PHOTO BROADCAST
-if(chatId===OWNER_ID && text.startsWith("/photo")){
+    const url = text.replace("/photo ", "");
+    const allUsers = await usersDB.find().toArray();
 
-let url=text.replace("/photo ","")
+    for (let user of allUsers) {
+      try {
+        await sendPhoto(user.chatId, url, "📢 Broadcast");
+      } catch {}
+    }
 
-for(let id of users){
+    await sendMessage(chatId, "✅ Photo Broadcast Sent");
+  }
 
-try{
-await sendPhoto(id,url,"📢 Broadcast Photo")
-}catch{}
+  // BUTTON BROADCAST
+  if (chatId === OWNER_ID && text.startsWith("/button")) {
 
-}
+    const data = text.replace("/button ", "").split("|");
+    const btnText = data[0];
+    const btnLink = data[1];
 
-await sendMessage(chatId,"✅ Photo Broadcast Sent")
+    const keyboard = {
+      inline_keyboard: [
+        [{ text: btnText, url: btnLink }]
+      ]
+    };
 
-}
+    const allUsers = await usersDB.find().toArray();
 
-res.status(200).send("ok")
+    for (let user of allUsers) {
+      try {
+        await sendMessage(user.chatId, "📢 Click Below", keyboard);
+      } catch {}
+    }
 
+    await sendMessage(chatId, "✅ Button Broadcast Sent");
+  }
+
+  res.status(200).send("ok");
 }
