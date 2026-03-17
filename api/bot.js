@@ -6,7 +6,6 @@ const OWNER_ID = "6941192709";
 let client;
 let db;
 
-// MongoDB Connection (SAFE)
 async function getDB() {
   if (!db) {
     client = new MongoClient(process.env.MONGO_URI);
@@ -16,30 +15,15 @@ async function getDB() {
   return db;
 }
 
-// Send Message
-async function sendMessage(chatId, text, keyboard = null) {
+async function sendMessage(chatId, text) {
   await fetch(`https://api.telegram.org/bot${TOKEN}/sendMessage`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       chat_id: chatId,
-      text,
-      parse_mode: "HTML",
-      reply_markup: keyboard,
-    }),
-  });
-}
-
-// Send Photo
-async function sendPhoto(chatId, photo, caption = "") {
-  await fetch(`https://api.telegram.org/bot${TOKEN}/sendPhoto`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      chat_id: chatId,
-      photo,
-      caption,
-    }),
+      text: text,
+      parse_mode: "HTML"
+    })
   });
 }
 
@@ -51,8 +35,19 @@ export default async function handler(req, res) {
       return res.status(200).send("ok");
     }
 
-    const chatId = String(body.message.chat.id);
-    const text = body.message.text ? body.message.text.trim() : "";
+    const message = body.message;
+    const chatId = String(message.chat.id);
+
+    // 🔥 TEXT SAFE FIX
+    let text = "";
+    if (message.text) {
+      text = message.text.trim();
+    }
+
+    // 🔥 REMOVE BOT USERNAME (/admin@botname fix)
+    if (text.includes("@")) {
+      text = text.split("@")[0];
+    }
 
     const usersDB = await getDB();
 
@@ -64,49 +59,45 @@ export default async function handler(req, res) {
     );
 
     // START
-    if (text.startsWith("/start")) {
-      const keyboard = {
-        inline_keyboard: [
-          [{ text: "📋 Copy Chat ID", callback_data: "copy" }],
-          [{ text: "🤖 Bot Info", callback_data: "info" }],
-        ],
-      };
-
-      await sendMessage(
-        chatId,
-        `📌 <b>Your Chat ID</b>
+    if (text === "/start") {
+      await sendMessage(chatId,
+`📌 Your Chat ID
 
 <code>${chatId}</code>
 
 ⚡ Fast • Simple • Permanent Bot
 
-Developer : SAHU`,
-        keyboard
-      );
+Developer : SAHU`);
     }
 
+    // OWNER CHECK
+    const isOwner = chatId === OWNER_ID;
+
     // ADMIN PANEL
-    if (chatId === OWNER_ID && text.includes("/admin")) {
-      await sendMessage(
-        chatId,
-        `⚙️ <b>ADMIN PANEL</b>
+    if (isOwner && text === "/admin") {
+      await sendMessage(chatId,
+`⚙️ ADMIN PANEL
 
 👥 /users
 📢 /broadcast message
 🖼 /photo url
-🔘 /button text|link`
-      );
+🔘 /button text|link`);
     }
 
-    // USERS COUNT
-    if (chatId === OWNER_ID && text.includes("/users")) {
+    // USERS
+    if (isOwner && text === "/users") {
       const count = await usersDB.countDocuments();
       await sendMessage(chatId, `👥 Total Users : ${count}`);
     }
 
-    // TEXT BROADCAST
-    if (chatId === OWNER_ID && text.includes("/broadcast")) {
-      const msg = text.split("/broadcast")[1]?.trim();
+    // BROADCAST
+    if (isOwner && text.startsWith("/broadcast")) {
+
+      const msg = text.replace("/broadcast", "").trim();
+
+      if (!msg) {
+        return await sendMessage(chatId, "❌ Message likho\nExample:\n/broadcast hello");
+      }
 
       const allUsers = await usersDB.find().toArray();
 
@@ -119,54 +110,13 @@ Developer : SAHU`,
         } catch {}
       }
 
-      await sendMessage(
-        chatId,
-        `✅ Broadcast Done
-
-Sent : ${sent}`
-      );
-    }
-
-    // PHOTO BROADCAST
-    if (chatId === OWNER_ID && text.includes("/photo")) {
-      const url = text.replace("/photo", "").trim();
-
-      const allUsers = await usersDB.find().toArray();
-
-      for (let user of allUsers) {
-        try {
-          await sendPhoto(user.chatId, url, "📢 Broadcast");
-        } catch {}
-      }
-
-      await sendMessage(chatId, "✅ Photo Broadcast Sent");
-    }
-
-    // BUTTON BROADCAST
-    if (chatId === OWNER_ID && text.includes("/button")) {
-      const data = text.replace("/button", "").trim().split("|");
-
-      const btnText = data[0];
-      const btnLink = data[1];
-
-      const keyboard = {
-        inline_keyboard: [[{ text: btnText, url: btnLink }]],
-      };
-
-      const allUsers = await usersDB.find().toArray();
-
-      for (let user of allUsers) {
-        try {
-          await sendMessage(user.chatId, "📢 Click Below", keyboard);
-        } catch {}
-      }
-
-      await sendMessage(chatId, "✅ Button Broadcast Sent");
+      await sendMessage(chatId, `✅ Broadcast Done\nSent: ${sent}`);
     }
 
     res.status(200).send("ok");
+
   } catch (err) {
-    console.log(err);
+    console.log("ERROR:", err);
     res.status(200).send("error handled");
   }
 }
