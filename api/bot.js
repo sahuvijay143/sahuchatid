@@ -3,155 +3,170 @@ import { MongoClient } from "mongodb";
 const TOKEN = "8614503312:AAGq8QSpIdsP8gaAS1Q8TmYX69k4rG5FePg";
 const OWNER_ID = "6941192709";
 
-const client = new MongoClient(process.env.MONGO_URI);
+let client;
+let db;
 
+// MongoDB Connection (SAFE)
 async function getDB() {
-  if (!client.topology?.isConnected()) await client.connect();
-  return client.db("telegram").collection("users");
+  if (!db) {
+    client = new MongoClient(process.env.MONGO_URI);
+    await client.connect();
+    db = client.db("telegram").collection("users");
+  }
+  return db;
 }
 
-async function sendMessage(chatId, text, keyboard=null) {
+// Send Message
+async function sendMessage(chatId, text, keyboard = null) {
   await fetch(`https://api.telegram.org/bot${TOKEN}/sendMessage`, {
     method: "POST",
-    headers: {"Content-Type": "application/json"},
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       chat_id: chatId,
       text,
       parse_mode: "HTML",
-      reply_markup: keyboard
-    })
+      reply_markup: keyboard,
+    }),
   });
 }
 
-async function sendPhoto(chatId, photo, caption="") {
+// Send Photo
+async function sendPhoto(chatId, photo, caption = "") {
   await fetch(`https://api.telegram.org/bot${TOKEN}/sendPhoto`, {
     method: "POST",
-    headers: {"Content-Type": "application/json"},
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       chat_id: chatId,
       photo,
-      caption
-    })
+      caption,
+    }),
   });
 }
 
 export default async function handler(req, res) {
+  try {
+    const body = req.body;
 
-  const body = req.body;
-  if (!body.message) return res.status(200).send("ok");
+    if (!body.message) {
+      return res.status(200).send("ok");
+    }
 
-  const chatId = String(body.message.chat.id);
-  const text = body.message.text;
+    const chatId = String(body.message.chat.id);
+    const text = body.message.text ? body.message.text.trim() : "";
 
-  const usersDB = await getDB();
+    const usersDB = await getDB();
 
-  // SAVE USER
-  await usersDB.updateOne(
-    { chatId },
-    { $set: { chatId } },
-    { upsert: true }
-  );
+    // SAVE USER
+    await usersDB.updateOne(
+      { chatId },
+      { $set: { chatId } },
+      { upsert: true }
+    );
 
-  // START
-  if (text === "/start") {
+    // START
+    if (text.startsWith("/start")) {
+      const keyboard = {
+        inline_keyboard: [
+          [{ text: "📋 Copy Chat ID", callback_data: "copy" }],
+          [{ text: "🤖 Bot Info", callback_data: "info" }],
+        ],
+      };
 
-    const keyboard = {
-      inline_keyboard: [
-        [{ text: "📋 Copy Chat ID", callback_data: "copy" }],
-        [{ text: "🤖 Bot Info", callback_data: "info" }]
-      ]
-    };
-
-    await sendMessage(chatId,
-`📌 <b>Your Chat ID</b>
+      await sendMessage(
+        chatId,
+        `📌 <b>Your Chat ID</b>
 
 <code>${chatId}</code>
 
 ⚡ Fast • Simple • Permanent Bot
 
-Developer : SAHU`, keyboard);
-  }
+Developer : SAHU`,
+        keyboard
+      );
+    }
 
-  // ADMIN PANEL
-  if (chatId === OWNER_ID && text === "/admin") {
-
-    await sendMessage(chatId,
-`⚙️ <b>ADMIN PANEL</b>
+    // ADMIN PANEL
+    if (chatId === OWNER_ID && text.startsWith("/admin")) {
+      await sendMessage(
+        chatId,
+        `⚙️ <b>ADMIN PANEL</b>
 
 👥 /users
-📢 /broadcast text
+📢 /broadcast message
 🖼 /photo url
-🔘 /button text|link`);
-  }
-
-  // USERS COUNT
-  if (chatId === OWNER_ID && text === "/users") {
-
-    const count = await usersDB.countDocuments();
-
-    await sendMessage(chatId,
-`👥 Total Users : ${count}`);
-  }
-
-  // TEXT BROADCAST
-  if (chatId === OWNER_ID && text.startsWith("/broadcast")) {
-
-    const msg = text.replace("/broadcast ", "");
-    const allUsers = await usersDB.find().toArray();
-
-    let sent = 0;
-
-    for (let user of allUsers) {
-      try {
-        await sendMessage(user.chatId, `📢 ${msg}`);
-        sent++;
-      } catch {}
+🔘 /button text|link`
+      );
     }
 
-    await sendMessage(chatId,
-`✅ Broadcast Done
-
-Sent : ${sent}`);
-  }
-
-  // PHOTO BROADCAST
-  if (chatId === OWNER_ID && text.startsWith("/photo")) {
-
-    const url = text.replace("/photo ", "");
-    const allUsers = await usersDB.find().toArray();
-
-    for (let user of allUsers) {
-      try {
-        await sendPhoto(user.chatId, url, "📢 Broadcast");
-      } catch {}
+    // USERS COUNT
+    if (chatId === OWNER_ID && text.startsWith("/users")) {
+      const count = await usersDB.countDocuments();
+      await sendMessage(chatId, `👥 Total Users : ${count}`);
     }
 
-    await sendMessage(chatId, "✅ Photo Broadcast Sent");
-  }
+    // TEXT BROADCAST
+    if (chatId === OWNER_ID && text.startsWith("/broadcast")) {
+      const msg = text.replace("/broadcast", "").trim();
 
-  // BUTTON BROADCAST
-  if (chatId === OWNER_ID && text.startsWith("/button")) {
+      const allUsers = await usersDB.find().toArray();
 
-    const data = text.replace("/button ", "").split("|");
-    const btnText = data[0];
-    const btnLink = data[1];
+      let sent = 0;
 
-    const keyboard = {
-      inline_keyboard: [
-        [{ text: btnText, url: btnLink }]
-      ]
-    };
+      for (let user of allUsers) {
+        try {
+          await sendMessage(user.chatId, `📢 ${msg}`);
+          sent++;
+        } catch {}
+      }
 
-    const allUsers = await usersDB.find().toArray();
+      await sendMessage(
+        chatId,
+        `✅ Broadcast Done
 
-    for (let user of allUsers) {
-      try {
-        await sendMessage(user.chatId, "📢 Click Below", keyboard);
-      } catch {}
+Sent : ${sent}`
+      );
     }
 
-    await sendMessage(chatId, "✅ Button Broadcast Sent");
-  }
+    // PHOTO BROADCAST
+    if (chatId === OWNER_ID && text.startsWith("/photo")) {
+      const url = text.replace("/photo", "").trim();
 
-  res.status(200).send("ok");
+      const allUsers = await usersDB.find().toArray();
+
+      for (let user of allUsers) {
+        try {
+          await sendPhoto(user.chatId, url, "📢 Broadcast");
+        } catch {}
+      }
+
+      await sendMessage(chatId, "✅ Photo Broadcast Sent");
+    }
+
+    // BUTTON BROADCAST
+    if (chatId === OWNER_ID && text.startsWith("/button")) {
+      const data = text.replace("/button", "").trim().split("|");
+
+      const btnText = data[0];
+      const btnLink = data[1];
+
+      const keyboard = {
+        inline_keyboard: [[{ text: btnText, url: btnLink }]],
+      };
+
+      const allUsers = await usersDB.find().toArray();
+
+      for (let user of allUsers) {
+        try {
+          await sendMessage(user.chatId, "📢 Click Below", keyboard);
+        } catch {}
+      }
+
+      await sendMessage(chatId, "✅ Button Broadcast Sent");
+    }
+
+    res.status(200).send("ok");
+  } catch (err) {
+    console.log(err);
+    res.status(200).send("error handled");
+  }
 }
