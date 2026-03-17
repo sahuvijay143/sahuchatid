@@ -1,122 +1,85 @@
-import { MongoClient } from "mongodb";
-
 const TOKEN = "8614503312:AAGq8QSpIdsP8gaAS1Q8TmYX69k4rG5FePg";
-const OWNER_ID = "6941192709";
+const OWNER_ID = 6941192709;
 
-let client;
-let db;
+let users = new Set();
 
-async function getDB() {
-  if (!db) {
-    client = new MongoClient(process.env.MONGO_URI);
-    await client.connect();
-    db = client.db("telegram").collection("users");
-  }
-  return db;
-}
-
-async function sendMessage(chatId, text) {
+async function sendMessage(chatId, text, keyboard = null) {
   await fetch(`https://api.telegram.org/bot${TOKEN}/sendMessage`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       chat_id: chatId,
       text: text,
-      parse_mode: "HTML"
+      parse_mode: "HTML",
+      reply_markup: keyboard
     })
   });
 }
 
 export default async function handler(req, res) {
-  try {
-    const body = req.body;
 
-    if (!body.message) {
-      return res.status(200).send("ok");
-    }
+  const body = req.body;
 
-    const message = body.message;
-    const chatId = String(message.chat.id);
+  if (body.message) {
 
-    // 🔥 TEXT SAFE FIX
-    let text = "";
-    if (message.text) {
-      text = message.text.trim();
-    }
+    const chatId = body.message.chat.id;
+    const text = body.message.text;
 
-    // 🔥 REMOVE BOT USERNAME (/admin@botname fix)
-    if (text.includes("@")) {
-      text = text.split("@")[0];
-    }
+    users.add(chatId);
 
-    const usersDB = await getDB();
-
-    // SAVE USER
-    await usersDB.updateOne(
-      { chatId },
-      { $set: { chatId } },
-      { upsert: true }
-    );
-
-    // START
+    // START COMMAND
     if (text === "/start") {
-      await sendMessage(chatId,
-`📌 Your Chat ID
 
+      const message = `
+<b>👋 Welcome to SAHU CHAT ID FIND</b>
+
+📌 Your Chat ID:
 <code>${chatId}</code>
 
-⚡ Fast • Simple • Permanent Bot
+Click and Copy your Chat ID easily.
 
-Developer : SAHU`);
-    }
+⚡ Features
+• Find Chat ID
+• Easy Copy
+• Fast Bot
 
-    // OWNER CHECK
-    const isOwner = chatId === OWNER_ID;
+Developer : SAHU
+`;
 
-    // ADMIN PANEL
-    if (isOwner && text === "/admin") {
-      await sendMessage(chatId,
-`⚙️ ADMIN PANEL
+      const keyboard = {
+        inline_keyboard: [
+          [
+            { text: "📋 Copy Chat ID", callback_data: "copy" }
+          ],
+          [
+            { text: "🤖 Bot Info", callback_data: "info" }
+          ]
+        ]
+      };
 
-👥 /users
-📢 /broadcast message
-🖼 /photo url
-🔘 /button text|link`);
-    }
-
-    // USERS
-    if (isOwner && text === "/users") {
-      const count = await usersDB.countDocuments();
-      await sendMessage(chatId, `👥 Total Users : ${count}`);
+      await sendMessage(chatId, message, keyboard);
     }
 
     // BROADCAST
-    if (isOwner && text.startsWith("/broadcast")) {
+    if (chatId === OWNER_ID && text.startsWith("/broadcast")) {
 
-      const msg = text.replace("/broadcast", "").trim();
+      const msg = text.replace("/broadcast ", "");
 
-      if (!msg) {
-        return await sendMessage(chatId, "❌ Message likho\nExample:\n/broadcast hello");
+      for (let id of users) {
+        await sendMessage(id, `📢 <b>Broadcast Message</b>\n\n${msg}`);
       }
 
-      const allUsers = await usersDB.find().toArray();
-
-      let sent = 0;
-
-      for (let user of allUsers) {
-        try {
-          await sendMessage(user.chatId, `📢 ${msg}`);
-          sent++;
-        } catch {}
-      }
-
-      await sendMessage(chatId, `✅ Broadcast Done\nSent: ${sent}`);
+      await sendMessage(chatId, `✅ Broadcast Sent\n👥 Users : ${users.size}`);
     }
 
-    res.status(200).send("ok");
+    // USER COUNT
+    if (chatId === OWNER_ID && text === "/users") {
 
-  } catch (err) {
-    console.log("ERROR:", err);
-    res.status(200).send("error handled");
+      await sendMessage(chatId, `👥 Total Users : ${users.size}`);
+    }
+
   }
+
+  res.status(200).send("ok");
+
 }
